@@ -1,0 +1,155 @@
+name: Build and Release Flutter App
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.4'
+          cache: true
+
+      # -------------------------
+      # VERSION STEPS (from working bot)
+      # -------------------------
+      - name: Get Current Version and Increment Build
+        id: version
+        run: |
+          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}')
+          VERSION_PART=$(echo $CURRENT_VERSION | cut -d'+' -f1)
+          CURRENT_BUILD=$(echo $CURRENT_VERSION | cut -d'+' -f2)
+          NEW_BUILD=$((CURRENT_BUILD + 1))
+          NEW_VERSION="$VERSION_PART+$NEW_BUILD"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION_PART" >> $GITHUB_OUTPUT
+
+      - name: Update Version in pubspec.yaml
+        run: |
+          sed -i "s/^version: .*/version: ${{ steps.version.outputs.new_version }}/" pubspec.yaml
+          echo "Updated to: ${{ steps.version.outputs.new_version }}"
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+
+      - name: Commit Version Bump
+        run: |
+          git add pubspec.yaml
+          git commit -m "ci: release ${{ steps.version.outputs.new_version }}"
+          git push
+
+      # -------------------------
+      # KEYSTORE & BUILD (from working bot)
+      # -------------------------
+      - name: Create Keystore from Secrets
+        run: |
+          echo "${{ secrets.KEYSTORE }}" | base64 -d > android/app/upload-keystore.jks
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build Release APK
+        run: flutter build apk --release
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Build Split APKs
+        run: flutter build apk --release --split-per-abi
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      # -------------------------
+      # RELEASE (from working bot with your notes enhancement)
+      # -------------------------
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          git fetch --tags
+          if git rev-parse ${{ steps.version.outputs.tag }} >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Release Notes
+        if: steps.check_tag.outputs.exists == 'false'
+        id: notes
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            RANGE=""
+          else
+            RANGE="$LAST_TAG..HEAD"
+          fi
+
+          FEAT=$(git log --pretty=format:"%s" $RANGE | grep -i '^feat' | sed -E 's/^[Ff][Ee][Aa][Tt]:?[ ]*//' || true)
+          FIX=$(git log --pretty=format:"%s" $RANGE | grep -i '^fix' | sed -E 's/^[Ff][Ii][Xx]:?[ ]*//' || true)
+          REFACTOR=$(git log --pretty=format:"%s" $RANGE | grep -i '^refactor' | sed -E 's/^[Rr][Ee][Ff][Aa][Cc][Tt][Oo][Rr]:?[ ]*//' || true)
+
+          NOTES_FILE=$(mktemp)
+          echo "Changes:" >> $NOTES_FILE
+          if [ -n "$FEAT" ]; then
+            echo "$FEAT" | sed 's/^/- /' >> $NOTES_FILE
+          else
+            echo "- None" >> $NOTES_FILE
+          fi
+
+          echo "" >> $NOTES_FILE
+          echo "Bug fixes:" >> $NOTES_FILE
+          if [ -n "$FIX" ]; then
+            echo "$FIX" | sed 's/^/- /' >> $NOTES_FILE
+          else
+            echo "- None" >> $NOTES_FILE
+          fi
+
+          echo "" >> $NOTES_FILE
+          echo "Refactor:" >> $NOTES_FILE
+          if [ -n "$REFACTOR" ]; then
+            echo "$REFACTOR" | sed 's/^/- /' >> $NOTES_FILE
+          else
+            echo "- None" >> $NOTES_FILE
+          fi
+
+          EOF_MARKER=$(openssl rand -hex 16)
+          echo "notes<<$EOF_MARKER" >> $GITHUB_OUTPUT
+          cat $NOTES_FILE >> $GITHUB_OUTPUT
+          echo "$EOF_MARKER" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body: ${{ steps.notes.outputs.notes }}
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
