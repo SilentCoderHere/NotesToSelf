@@ -1,11 +1,10 @@
-// Updated: models/note.dart
 import 'dart:convert';
 
 class Note {
   final int? id;
   final String text;
   final DateTime createdAt;
-  final int? replyToId; // NEW: tracks the note being replied to
+  final int? replyToId;
 
   Note({this.id, required this.text, required this.createdAt, this.replyToId});
 
@@ -23,7 +22,7 @@ class Note {
       'id': id,
       'text': text,
       'created_at': createdAt.toIso8601String(),
-      'reply_to_id': replyToId, // store in DB
+      'reply_to_id': replyToId,
     };
   }
 
