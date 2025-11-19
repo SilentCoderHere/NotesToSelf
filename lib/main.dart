@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 
-import 'screens/days_list_screen.dart';
+import 'screens/home.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,7 +33,7 @@ class MyApp extends StatelessWidget {
           themeMode: ThemeMode.system,
           theme: ThemeData(useMaterial3: true, colorScheme: lightScheme),
           darkTheme: ThemeData(useMaterial3: true, colorScheme: darkScheme),
-          home: const DaysListPage(),
+          home: const HomeScreen(),
           debugShowCheckedModeBanner: false,
         );
       },
