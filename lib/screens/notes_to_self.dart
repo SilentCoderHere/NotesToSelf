@@ -572,7 +572,7 @@ class _NoteOptionsBottomSheetState extends State<_NoteOptionsBottomSheet> {
             height: 4,
             margin: const EdgeInsets.only(bottom: 16),
             decoration: BoxDecoration(
-              color: widget.colorScheme.onSurface.withOpacity(0.2),
+              color: widget.colorScheme.onSurface.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -644,7 +644,9 @@ class _NoteOptionsBottomSheetState extends State<_NoteOptionsBottomSheet> {
                 Icon(
                   Icons.note_outlined,
                   size: 16,
-                  color: widget.colorScheme.onSurfaceVariant.withOpacity(0.5),
+                  color: widget.colorScheme.onSurfaceVariant.withValues(
+                    alpha: 0.5,
+                  ),
                 ),
               ],
             ),
@@ -766,7 +768,7 @@ class _NoteOptionsBottomSheetState extends State<_NoteOptionsBottomSheet> {
       trailing: Icon(
         Icons.arrow_forward_ios_rounded,
         size: 16,
-        color: colorScheme.onSurface.withOpacity(0.5),
+        color: colorScheme.onSurface.withValues(alpha: 0.5),
       ),
       onTap: onTap,
     );
