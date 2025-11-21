@@ -32,17 +32,16 @@ jobs:
       # -------------------------
       # VERSION STEPS (from working bot)
       # -------------------------
-      - name: Get Current Version and Increment Build
-        id: version
-        run: |
-          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}')
-          VERSION_PART=$(echo $CURRENT_VERSION | cut -d'+' -f1)
-          CURRENT_BUILD=$(echo $CURRENT_VERSION | cut -d'+' -f2)
-          NEW_BUILD=$((CURRENT_BUILD + 1))
-          NEW_VERSION="$VERSION_PART+$NEW_BUILD"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION_PART" >> $GITHUB_OUTPUT
-
+      name: Get Current Version and Set Timestamp Build
+      id: version
+      run: |
+        CURRENT_VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}')
+        VERSION_PART=$(echo $CURRENT_VERSION | cut -d'+' -f1)
+        TIMESTAMP_BUILD=$(date +%s)
+        NEW_VERSION="$VERSION_PART+$TIMESTAMP_BUILD"
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$VERSION_PART" >> $GITHUB_OUTPUT
+        
       - name: Update Version in pubspec.yaml
         run: |
           sed -i "s/^version: .*/version: ${{ steps.version.outputs.new_version }}/" pubspec.yaml
