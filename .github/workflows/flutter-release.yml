@@ -17,20 +17,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.35.4'
-          cache: true
-
       # -------------------------
-      # FIXED VERSION STEPS
+      # VERSION UPDATE - DO THIS FIRST
       # -------------------------
       - name: Get Current Version and Increment Build
         id: version
@@ -63,11 +51,13 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION_PART" >> $GITHUB_OUTPUT
+          echo "version_part=$VERSION_PART" >> $GITHUB_OUTPUT
+          echo "new_build=$NEW_BUILD" >> $GITHUB_OUTPUT
 
       - name: Update Version in pubspec.yaml
         run: |
           sed -i "s/^version: .*/version: ${{ steps.version.outputs.new_version }}/" pubspec.yaml
-          echo "Updated to: ${{ steps.version.outputs.new_version }}"
+          echo "Updated pubspec.yaml to: ${{ steps.version.outputs.new_version }}"
 
       - name: Configure Git
         run: |
@@ -81,8 +71,20 @@ jobs:
           git push
 
       # -------------------------
-      # KEYSTORE & BUILD
+      # SETUP & BUILD
       # -------------------------
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.4'
+          cache: true
+
       - name: Create Keystore from Secrets
         run: |
           echo "${{ secrets.KEYSTORE }}" | base64 -d > android/app/upload-keystore.jks
@@ -90,12 +92,48 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
+      # -------------------------
+      # CRITICAL FIX: Clean and rebuild
+      # -------------------------
+      - name: Clean Flutter Build
+        run: |
+          echo "=== Performing clean build ==="
+          flutter clean
+
+      - name: Verify Version Before Build
+        run: |
+          echo "=== Final Version Check ==="
+          echo "pubspec.yaml version: $(grep '^version:' pubspec.yaml | awk '{print $2}')"
+          echo "Current directory: $(pwd)"
+          echo "Files in current dir:"
+          ls -la
+
+      # -------------------------
+      # BUILD WITH CLEAN CACHE
+      # -------------------------
       - name: Build Split APKs
-        run: flutter build apk --release --split-per-abi
+        run: |
+          # Force Gradle to reconfigure by deleting Gradle cache
+          rm -rf android/.gradle
+          rm -f android/app/build.gradle.kts
+          flutter build apk --release --split-per-abi --no-build-cache
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      # -------------------------
+      # DEBUG: Check what version was actually built
+      # -------------------------
+      - name: Check Built APK Version
+        run: |
+          echo "=== Checking built APK info ==="
+          if [ -f "build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" ]; then
+            # Try to extract version info from APK
+            aapt dump badging build/app/outputs/flutter-apk/app-arm64-v8a-release.apk | grep version || echo "Could not extract version from APK"
+          else
+            echo "APK file not found"
+          fi
 
       # -------------------------
       # RELEASE
