@@ -1,143 +1,85 @@
 name: Build and Release Flutter App
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger - run when you click the button
 
 permissions:
-  contents: write
+  contents: write  # Allow writing to repository (for commits and releases)
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-latest  # Use latest Ubuntu machine
+    timeout-minutes: 30  # Stop if takes longer than 30 minutes
 
     steps:
+      # Checkout code from repository
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # -------------------------
-      # VERSION UPDATE - DO THIS FIRST
-      # -------------------------
-      - name: Get Current Version and Increment Build
-        id: version
-        run: |
-          # Extract version more reliably
-          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '[:space:]')
-          if [ -z "$CURRENT_VERSION" ]; then
-            echo "Error: Could not extract version from pubspec.yaml"
-            exit 1
-          fi
-          echo "Current version: $CURRENT_VERSION"
-          
-          # Split version and build number
-          VERSION_PART=$(echo "$CURRENT_VERSION" | sed 's/\+.*//')
-          CURRENT_BUILD=$(echo "$CURRENT_VERSION" | sed 's/.*+//')
-          
-          # Validate build number is numeric
-          if ! echo "$CURRENT_BUILD" | grep -qE '^[0-9]+$'; then
-            echo "Error: Build number '$CURRENT_BUILD' is not numeric"
-            exit 1
-          fi
-          
-          echo "Version part: $VERSION_PART"
-          echo "Current build: $CURRENT_BUILD"
-          
-          # Increment build number
-          NEW_BUILD=$((CURRENT_BUILD + 1))
-          NEW_VERSION="${VERSION_PART}+${NEW_BUILD}"
-          
-          echo "New version: $NEW_VERSION"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION_PART" >> $GITHUB_OUTPUT
-          echo "version_part=$VERSION_PART" >> $GITHUB_OUTPUT
-          echo "new_build=$NEW_BUILD" >> $GITHUB_OUTPUT
-
-      - name: Update Version in pubspec.yaml
-        run: |
-          sed -i "s/^version: .*/version: ${{ steps.version.outputs.new_version }}/" pubspec.yaml
-          echo "Updated pubspec.yaml to: ${{ steps.version.outputs.new_version }}"
-
-      - name: Configure Git
-        run: |
-          git config --global user.email "action@github.com"
-          git config --global user.name "GitHub Action"
-
-      - name: Commit Version Bump
-        run: |
-          git add pubspec.yaml
-          git commit -m "ci: release ${{ steps.version.outputs.new_version }}"
-          git push
-
-      # -------------------------
-      # SETUP & BUILD
-      # -------------------------
+      # Setup Java for Android builds
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
+      # Setup Flutter environment
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.4'
           cache: true
 
+      # Read current version and increase build number
+      - name: Get Current Version and Increment Build
+        id: version
+        run: |
+          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}')
+          VERSION_PART=$(echo $CURRENT_VERSION | cut -d'+' -f1)
+          CURRENT_BUILD=$(echo $CURRENT_VERSION | cut -d'+' -f2)
+          NEW_BUILD=$((CURRENT_BUILD + 1))
+          NEW_VERSION="$VERSION_PART+$NEW_BUILD"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION_PART" >> $GITHUB_OUTPUT
+
+      # Update version in pubspec.yaml file
+      - name: Update Version in pubspec.yaml
+        run: |
+          sed -i "s/^version: .*/version: ${{ steps.version.outputs.new_version }}/" pubspec.yaml
+
+      # Setup git user for commits
+      - name: Configure Git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+
+      # Commit the version change
+      - name: Commit Version Bump
+        run: |
+          git add pubspec.yaml
+          git commit -m "ci: release ${{ steps.version.outputs.new_version }}"
+          git push
+
+      # Create keystore file from secret for signing
       - name: Create Keystore from Secrets
         run: |
           echo "${{ secrets.KEYSTORE }}" | base64 -d > android/app/upload-keystore.jks
 
+      # Download Flutter packages
       - name: Install Dependencies
         run: flutter pub get
 
-      # -------------------------
-      # CRITICAL FIX: Clean and rebuild
-      # -------------------------
-      - name: Clean Flutter Build
-        run: |
-          echo "=== Performing clean build ==="
-          flutter clean
-
-      - name: Verify Version Before Build
-        run: |
-          echo "=== Final Version Check ==="
-          echo "pubspec.yaml version: $(grep '^version:' pubspec.yaml | awk '{print $2}')"
-          echo "Current directory: $(pwd)"
-          echo "Files in current dir:"
-          ls -la
-
-      # -------------------------
-      # BUILD WITH CLEAN CACHE
-      # -------------------------
+      # Build APK files for different architectures
       - name: Build Split APKs
-        run: |
-          # Force Gradle to reconfigure by deleting Gradle cache
-          rm -rf android/.gradle
-          rm -f android/app/build.gradle.kts
-          flutter build apk --release --split-per-abi --no-build-cache
+        run: flutter build apk --release --split-per-abi
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      # -------------------------
-      # DEBUG: Check what version was actually built
-      # -------------------------
-      - name: Check Built APK Version
-        run: |
-          echo "=== Checking built APK info ==="
-          if [ -f "build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" ]; then
-            # Try to extract version info from APK
-            aapt dump badging build/app/outputs/flutter-apk/app-arm64-v8a-release.apk | grep version || echo "Could not extract version from APK"
-          else
-            echo "APK file not found"
-          fi
-
-      # -------------------------
-      # RELEASE
-      # -------------------------
+      # Check if release tag already exists
       - name: Check if tag exists
         id: check_tag
         run: |
@@ -148,58 +90,13 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Generate Release Notes
-        if: steps.check_tag.outputs.exists == 'false'
-        id: notes
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-
-          if [ -z "$LAST_TAG" ]; then
-            RANGE=""
-          else
-            RANGE="$LAST_TAG..HEAD"
-          fi
-
-          FEAT=$(git log --pretty=format:"%s" $RANGE | grep -i '^feat' | sed -E 's/^[Ff][Ee][Aa][Tt]:?[ ]*//' || true)
-          FIX=$(git log --pretty=format:"%s" $RANGE | grep -i '^fix' | sed -E 's/^[Ff][Ii][Xx]:?[ ]*//' || true)
-          REFACTOR=$(git log --pretty=format:"%s" $RANGE | grep -i '^refactor' | sed -E 's/^[Rr][Ee][Ff][Aa][Cc][Tt][Oo][Rr]:?[ ]*//' || true)
-
-          NOTES_FILE=$(mktemp)
-          echo "Changes:" >> $NOTES_FILE
-          if [ -n "$FEAT" ]; then
-            echo "$FEAT" | sed 's/^/- /' >> $NOTES_FILE
-          else
-            echo "- None" >> $NOTES_FILE
-          fi
-
-          echo "" >> $NOTES_FILE
-          echo "Bug fixes:" >> $NOTES_FILE
-          if [ -n "$FIX" ]; then
-            echo "$FIX" | sed 's/^/- /' >> $NOTES_FILE
-          else
-            echo "- None" >> $NOTES_FILE
-          fi
-
-          echo "" >> $NOTES_FILE
-          echo "Refactor:" >> $NOTES_FILE
-          if [ -n "$REFACTOR" ]; then
-            echo "$REFACTOR" | sed 's/^/- /' >> $NOTES_FILE
-          else
-            echo "- None" >> $NOTES_FILE
-          fi
-
-          EOF_MARKER=$(openssl rand -hex 16)
-          echo "notes<<$EOF_MARKER" >> $GITHUB_OUTPUT
-          cat $NOTES_FILE >> $GITHUB_OUTPUT
-          echo "$EOF_MARKER" >> $GITHUB_OUTPUT
-
+      # Create GitHub release with APK files
       - name: Create Release
         if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          body: ${{ steps.notes.outputs.notes }}
           files: |
             build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
             build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
