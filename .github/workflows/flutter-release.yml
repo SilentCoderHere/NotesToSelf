@@ -30,16 +30,37 @@ jobs:
           cache: true
 
       # -------------------------
-      # VERSION STEPS (from working bot)
+      # FIXED VERSION STEPS
       # -------------------------
       - name: Get Current Version and Increment Build
         id: version
         run: |
-          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}')
-          VERSION_PART=$(echo $CURRENT_VERSION | cut -d'+' -f1)
-          CURRENT_BUILD=$(echo $CURRENT_VERSION | cut -d'+' -f2)
+          # Extract version more reliably
+          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '[:space:]')
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "Error: Could not extract version from pubspec.yaml"
+            exit 1
+          fi
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Split version and build number
+          VERSION_PART=$(echo "$CURRENT_VERSION" | sed 's/\+.*//')
+          CURRENT_BUILD=$(echo "$CURRENT_VERSION" | sed 's/.*+//')
+          
+          # Validate build number is numeric
+          if ! echo "$CURRENT_BUILD" | grep -qE '^[0-9]+$'; then
+            echo "Error: Build number '$CURRENT_BUILD' is not numeric"
+            exit 1
+          fi
+          
+          echo "Version part: $VERSION_PART"
+          echo "Current build: $CURRENT_BUILD"
+          
+          # Increment build number
           NEW_BUILD=$((CURRENT_BUILD + 1))
-          NEW_VERSION="$VERSION_PART+$NEW_BUILD"
+          NEW_VERSION="${VERSION_PART}+${NEW_BUILD}"
+          
+          echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION_PART" >> $GITHUB_OUTPUT
 
@@ -60,7 +81,7 @@ jobs:
           git push
 
       # -------------------------
-      # KEYSTORE & BUILD (from working bot)
+      # KEYSTORE & BUILD
       # -------------------------
       - name: Create Keystore from Secrets
         run: |
@@ -68,13 +89,6 @@ jobs:
 
       - name: Install Dependencies
         run: flutter pub get
-
-      # - name: Build Release APK
-      #   run: flutter build apk --release
-      #   env:
-      #     KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      #     KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      #     KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Build Split APKs
         run: flutter build apk --release --split-per-abi
@@ -84,7 +98,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       # -------------------------
-      # RELEASE (from working bot with your notes enhancement)
+      # RELEASE
       # -------------------------
       - name: Check if tag exists
         id: check_tag
