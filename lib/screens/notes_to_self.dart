@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:notestoself/utils/snackbar.dart';
 
 import '../models/note.dart';
 import '../utils/database_helper.dart';
@@ -14,6 +15,7 @@ class NotesToSelfPage extends StatefulWidget {
   final List<Note> initialNotes;
   final String displayDate;
   final bool isToday;
+  final bool shouldAutoScrollToBottom;
 
   const NotesToSelfPage({
     super.key,
@@ -21,6 +23,7 @@ class NotesToSelfPage extends StatefulWidget {
     required this.initialNotes,
     required this.displayDate,
     required this.isToday,
+    this.shouldAutoScrollToBottom = false,
   });
 
   @override
@@ -34,6 +37,7 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
   final ScrollController _scrollController = ScrollController();
   bool _isEditing = false;
   int? _editIndex;
+  bool _hasPerformedInitialScroll = false;
 
   late AnimationController _animController;
   late Animation<Color?> _buttonColorAnimation;
@@ -79,7 +83,6 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
       await Future.delayed(const Duration(milliseconds: 100));
       if (mounted) {
         FocusScope.of(context).requestFocus(_inputFocusNode);
-        _scrollToBottom();
         _entryAnimationController.forward();
       }
     });
@@ -126,6 +129,15 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
     );
   }
 
+  String _getDisplayTextForNote(Note note) {
+    if (!note.text.startsWith('↪ ')) return note.text;
+
+    final newlineIndex = note.text.indexOf('\n');
+    if (newlineIndex == -1) return note.text;
+
+    return note.text.substring(newlineIndex + 1);
+  }
+
   void _setReplyingNote(Note? note) {
     setState(() {
       _replyingNote = note;
@@ -154,12 +166,31 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
     if (text.isEmpty) return;
 
     String finalText = text;
-    if (_replyingNote != null) {
-      finalText = "↪ ${_replyingNote!.text}\n$text";
+    Note? originalReplyingNote = _replyingNote;
+
+    if (_isEditing && _editIndex != null) {
+      final originalNote = _notes[_editIndex!];
+      if (originalNote.text.startsWith('↪ ')) {
+        final newlineIndex = originalNote.text.indexOf('\n');
+        if (newlineIndex != -1) {
+          final quotedText = originalNote.text.substring(0, newlineIndex + 1);
+          finalText = '$quotedText$text';
+          originalReplyingNote = null;
+        }
+      }
     }
 
-    final now = DateTime.now();
+    if (originalReplyingNote != null && !_isEditing) {
+      final quotedText = _getDisplayTextForNote(originalReplyingNote);
+      finalText = "↪ $quotedText\n$text";
+    }
+
+    DateTime now = DateTime.now();
     late Note newNote;
+
+    if (_isEditing && _editIndex != null) {
+      now = _notes[_editIndex!].createdAt;
+    }
 
     setState(() {
       if (_isEditing && _editIndex != null) {
@@ -192,26 +223,41 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
     _scrollToBottom();
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool immediate = false}) {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent + 80,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      final scrollPosition = _scrollController.position;
+      final targetPosition = scrollPosition.maxScrollExtent + 80;
+
+      if (immediate) {
+        _scrollController.jumpTo(targetPosition);
+      } else {
+        _scrollController.animateTo(
+          targetPosition,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     }
   }
 
   void _startEditing(int index) {
     if (!_canAddOrEdit()) {
-      _showSnackBar('Editing is only allowed within 5 minutes');
+      showSnackBar(
+        context,
+        Text("Editing is only allowed within 5 minutes"),
+        SnackbarType.warning,
+      );
       return;
     }
+
+    final note = _notes[index];
+    String displayText = _getDisplayTextForNote(note);
 
     setState(() {
       _isEditing = true;
       _editIndex = index;
-      _controller.text = _notes[index].text;
+      _controller.text = displayText;
+      _setReplyingNote(null);
       FocusScope.of(context).requestFocus(_inputFocusNode);
     });
   }
@@ -274,17 +320,6 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
         _controller.clear();
       }
     });
-  }
-
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        backgroundColor: Theme.of(context).colorScheme.inverseSurface,
-      ),
-    );
   }
 
   void _showNoteOptions(Note note, int index, bool canEdit) async {
@@ -376,11 +411,30 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
     return Scaffold(
       backgroundColor: cs.surface,
       appBar: AppBar(
-        title: Text(widget.displayDate),
+        title: Text(
+          widget.displayDate,
+          style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
         backgroundColor: cs.surface,
         elevation: 0,
         scrolledUnderElevation: 3,
         surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  cs.outline.withValues(alpha: 0.1),
+                  cs.outline.withValues(alpha: 0.3),
+                  cs.outline.withValues(alpha: 0.1),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
       body: SafeArea(
         child: Column(
@@ -393,73 +447,158 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
             ),
 
             Expanded(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                child: Scrollbar(
-                  controller: _scrollController,
-                  thumbVisibility: true,
-                  child: ListView.builder(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (!_hasPerformedInitialScroll &&
+                      widget.shouldAutoScrollToBottom) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && _scrollController.hasClients) {
+                        _scrollController.jumpTo(
+                          _scrollController.position.maxScrollExtent + 100,
+                        );
+                        _hasPerformedInitialScroll = true;
+                      }
+                    });
+                  }
+                  return false;
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        cs.surface,
+                        cs.surfaceContainerHighest.withValues(alpha: 0.05),
+                      ],
+                    ),
+                  ),
+                  child: Scrollbar(
                     controller: _scrollController,
-                    padding: const EdgeInsets.only(top: 12, bottom: 12),
-                    itemCount: _notes.length,
-                    itemBuilder: (context, idx) {
-                      final delay = idx * 0.1;
-                      final itemAnimation = CurvedAnimation(
-                        parent: _entryAnimationController,
-                        curve: Interval(
-                          delay.clamp(0.0, 1.0),
-                          1.0,
-                          curve: Curves.easeOutCubic,
-                        ),
-                      );
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    radius: const Radius.circular(20),
+                    thickness: 4,
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: _notes.length,
+                      itemBuilder: (context, idx) {
+                        final delay = idx * 0.1;
+                        final itemAnimation = CurvedAnimation(
+                          parent: _entryAnimationController,
+                          curve: Interval(
+                            delay.clamp(0.0, 1.0),
+                            1.0,
+                            curve: Curves.easeOutCubic,
+                          ),
+                        );
 
-                      final note = _notes[idx];
-                      final canEdit =
-                          DateTime.now().difference(note.createdAt) <=
-                          const Duration(minutes: 5);
+                        final note = _notes[idx];
+                        final canEdit =
+                            DateTime.now().difference(note.createdAt) <=
+                            const Duration(minutes: 5);
 
-                      return NoteBubble(
-                        note: note,
-                        index: idx,
-                        isToday: widget.isToday,
-                        animation: itemAnimation,
-                        onLongPress: () => _showNoteOptions(note, idx, canEdit),
-                        onReply: () => _setReplyingNote(note),
-                        showReplyButton: true,
-                      );
-                    },
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: NoteBubble(
+                            note: note,
+                            index: idx,
+                            isToday: widget.isToday,
+                            animation: itemAnimation,
+                            onLongPress: () =>
+                                _showNoteOptions(note, idx, canEdit),
+                            onReply: () => _setReplyingNote(note),
+                            showReplyButton: true,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
             ),
-            const Divider(height: 1),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            Container(
+              height: 1,
               decoration: BoxDecoration(
-                color: cs.surface,
                 boxShadow: [
                   BoxShadow(
                     color: cs.shadow.withValues(alpha: 0.1),
                     blurRadius: 8,
-                    offset: const Offset(0, -2),
+                    spreadRadius: 1,
                   ),
                 ],
+              ),
+            ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: BoxDecoration(
+                color: cs.surface,
+                boxShadow: [
+                  BoxShadow(
+                    color: cs.shadow.withValues(alpha: 0.15),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
+                ),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (_replyingNote != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: cs.primaryContainer.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: cs.primaryContainer.withValues(alpha: 0.5),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.reply_rounded,
+                            size: 18,
+                            color: cs.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Replying to a note',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: cs.primary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   Row(
                     children: [
                       Expanded(
                         child: Container(
                           decoration: BoxDecoration(
                             color: cs.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(24),
                             boxShadow: [
                               BoxShadow(
-                                color: cs.shadow.withValues(alpha: 0.05),
-                                blurRadius: 4,
+                                color: cs.shadow.withValues(alpha: 0.1),
+                                blurRadius: 8,
                                 offset: const Offset(0, 2),
                               ),
                             ],
@@ -473,25 +612,36 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
                             decoration: InputDecoration(
                               border: InputBorder.none,
                               hintText: _replyingNote != null
-                                  ? 'Replying...'
+                                  ? 'Type your reply...'
                                   : canEditOrAdd
                                   ? 'Type your note...'
                                   : 'Cannot edit past notes',
                               hintStyle: textTheme.bodyMedium?.copyWith(
                                 color: cs.onSurfaceVariant.withValues(
-                                  alpha: 0.5,
+                                  alpha: 0.6,
                                 ),
                               ),
                               contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
+                                horizontal: 20,
+                                vertical: 16,
                               ),
+                              suffixIcon: !canEditOrAdd
+                                  ? Icon(
+                                      Icons.lock_outline_rounded,
+                                      size: 20,
+                                      color: cs.onSurfaceVariant.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                    )
+                                  : null,
                             ),
-                            style: textTheme.bodyMedium,
+                            style: textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 16),
                       GestureDetector(
                         onTapDown: (_) {
                           if (canEditOrAdd && hasText) {
@@ -501,6 +651,7 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
                         onTapUp: (_) {
                           if (canEditOrAdd && hasText) {
                             _animController.reverse();
+                            _sendNote();
                           }
                         },
                         onTapCancel: () {
@@ -519,6 +670,29 @@ class _NotesToSelfPageState extends State<NotesToSelfPage>
                       ),
                     ],
                   ),
+                  if (!canEditOrAdd)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            size: 14,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.isToday
+                                ? '5 minute edit window expired'
+                                : 'Notes are view-only for past dates',
+                            style: textTheme.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -632,7 +806,9 @@ class _NoteOptionsBottomSheetState extends State<_NoteOptionsBottomSheet> {
               children: [
                 Expanded(
                   child: Text(
-                    widget.note.text,
+                    widget.note.text.startsWith('↪ ')
+                        ? 'Replying to a note'
+                        : widget.note.text,
                     style: widget.textTheme.bodyMedium?.copyWith(
                       color: widget.colorScheme.onSurfaceVariant,
                     ),
@@ -734,43 +910,72 @@ class _NoteOptionsBottomSheetState extends State<_NoteOptionsBottomSheet> {
 
     final colorScheme = Theme.of(context).colorScheme;
 
-    return ListTile(
-      leading: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: isDestructive
-              ? colorScheme.errorContainer
-              : colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(
-          icon,
-          color: isDestructive
-              ? colorScheme.onErrorContainer
-              : colorScheme.onPrimaryContainer,
-          size: 20,
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        splashColor: isDestructive
+            ? colorScheme.error.withValues(alpha: 0.1)
+            : colorScheme.primary.withValues(alpha: 0.1),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isDestructive
+                      ? colorScheme.errorContainer.withValues(alpha: 0.2)
+                      : colorScheme.primaryContainer.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  color: isDestructive
+                      ? colorScheme.error
+                      : colorScheme.primary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: widget.textTheme.bodyLarge?.copyWith(
+                        color: isDestructive
+                            ? colorScheme.error
+                            : colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: widget.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.7,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 16,
+                color: colorScheme.onSurface.withValues(alpha: 0.4),
+              ),
+            ],
+          ),
         ),
       ),
-      title: Text(
-        title,
-        style: widget.textTheme.bodyLarge?.copyWith(
-          color: isDestructive ? colorScheme.error : colorScheme.onSurface,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: widget.textTheme.bodySmall?.copyWith(
-          color: colorScheme.onSurfaceVariant,
-        ),
-      ),
-      trailing: Icon(
-        Icons.arrow_forward_ios_rounded,
-        size: 16,
-        color: colorScheme.onSurface.withValues(alpha: 0.5),
-      ),
-      onTap: onTap,
     );
   }
 }

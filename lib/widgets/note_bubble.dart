@@ -22,6 +22,24 @@ class NoteBubble extends StatelessWidget {
     this.showReplyButton = true,
   });
 
+  String? _extractOriginalMessage(String noteText) {
+    if (!noteText.startsWith('↪ ')) return null;
+
+    final newlineIndex = noteText.indexOf('\n');
+    if (newlineIndex == -1) return null;
+
+    return noteText.substring(2, newlineIndex);
+  }
+
+  String _getDisplayText(String noteText) {
+    if (!noteText.startsWith('↪')) return noteText;
+
+    final newlineIndex = noteText.indexOf('\n');
+    if (newlineIndex == -1) return noteText;
+
+    return noteText.substring(newlineIndex + 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -75,9 +93,7 @@ class NoteBubble extends StatelessWidget {
                   ],
 
                   Text(
-                    note.text.startsWith('↪')
-                        ? note.text.substring(note.text.indexOf('\n') + 1)
-                        : note.text,
+                    _getDisplayText(note.text),
                     style: TextStyle(
                       color: colorScheme.onPrimaryContainer,
                       fontSize: 15,
@@ -125,7 +141,7 @@ class NoteBubble extends StatelessWidget {
 
   Widget _buildReplyContext(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final originalNote = note.text.substring(2, note.text.indexOf('\n'));
+    final originalMessage = _extractOriginalMessage(note.text);
 
     return Container(
       width: double.infinity,
@@ -151,7 +167,7 @@ class NoteBubble extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              originalNote,
+              originalMessage ?? 'Replying to a note',
               style: TextStyle(
                 color: colorScheme.onPrimaryContainer.withValues(alpha: 0.8),
                 fontSize: 12,

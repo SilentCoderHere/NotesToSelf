@@ -96,7 +96,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (!_hasAutoOpened) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _openDayNotes(todayKey, autoFocus: true);
+        _openDayNotes(todayKey, autoFocus: true, autoScroll: true);
         _hasAutoOpened = true;
       });
     }
@@ -112,7 +112,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }).toList();
   }
 
-  void _openDayNotes(String dateKey, {bool autoFocus = false}) async {
+  void _openDayNotes(
+    String dateKey, {
+    bool autoFocus = false,
+    bool autoScroll = false,
+  }) async {
     final notes = await DatabaseHelper.instance.getNotesForDay(dateKey);
     if (!mounted) return;
 
@@ -125,6 +129,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               initialNotes: notes,
               displayDate: displayFormat.format(DateTime.parse(dateKey)),
               isToday: dateKey == keyFormat.format(DateTime.now()),
+              shouldAutoScrollToBottom: autoScroll,
             ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(1.0, 0.0);
@@ -142,7 +147,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         },
         transitionDuration: const Duration(milliseconds: 600),
       ),
-    ).then((_) => _loadAllNotes());
+    ).then((_) {
+      _loadAllNotes();
+    });
   }
 
   void _openSettings() {
@@ -167,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         },
         transitionDuration: const Duration(milliseconds: 600),
       ),
-    );
+    ).then((_) => _loadAllNotes());
   }
 
   @override
@@ -270,7 +277,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         buttonText: 'Create First Note',
         onButtonPressed: () {
           final todayKey = keyFormat.format(DateTime.now());
-          _openDayNotes(todayKey, autoFocus: true);
+          _openDayNotes(todayKey, autoFocus: true, autoScroll: true);
         },
       );
     } else {

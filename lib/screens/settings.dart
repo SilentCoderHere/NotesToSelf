@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:notestoself/utils/snackbar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -69,11 +70,15 @@ class _SettingsPageState extends State<SettingsPage>
       );
 
       if (context.mounted) {
-        _showSnackBar(context, 'Backup shared successfully', isError: false);
+        showSnackBar(
+          context,
+          Text('Backup shared successfully'),
+          SnackbarType.success,
+        );
       }
     } catch (e) {
       if (context.mounted) {
-        _showSnackBar(context, 'Backup failed: $e', isError: true);
+        showSnackBar(context, Text('Backup failed: $e'), SnackbarType.error);
       }
     }
   }
@@ -106,12 +111,12 @@ class _SettingsPageState extends State<SettingsPage>
       });
 
       if (context.mounted) {
-        _showSnackBar(context, 'Restore successful!', isError: false);
+        showSnackBar(context, Text('Restore successful'), SnackbarType.success);
         Navigator.pop(context, true);
       }
     } catch (e) {
       if (context.mounted) {
-        _showSnackBar(context, 'Restore failed: $e', isError: true);
+        showSnackBar(context, Text('Restore failed: $e'), SnackbarType.error);
       }
     }
   }
@@ -133,35 +138,15 @@ class _SettingsPageState extends State<SettingsPage>
         final db = await DatabaseHelper.instance.database;
         await db.delete('notes');
         if (context.mounted) {
-          _showSnackBar(context, 'All data cleared', isError: false);
+          showSnackBar(context, Text('Clear successful'), SnackbarType.success);
           Navigator.pop(context, true);
         }
       } catch (e) {
         if (context.mounted) {
-          _showSnackBar(context, 'Clear failed: $e', isError: true);
+          showSnackBar(context, Text('Clear failed: $e'), SnackbarType.error);
         }
       }
     }
-  }
-
-  void _showSnackBar(
-    BuildContext context,
-    String message, {
-    bool isError = false,
-  }) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        backgroundColor: isError
-            ? colorScheme.error
-            : colorScheme.inverseSurface,
-        duration: const Duration(seconds: 3),
-      ),
-    );
   }
 
   @override
